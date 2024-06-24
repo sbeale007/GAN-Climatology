@@ -20,13 +20,13 @@ from matplotlib import colorbar, colors, gridspec
 library(terra)
 library(data.table)
 
-data_folder <- "C:/Users/SBEALE/Desktop/tmax/tmax_march_nonan_small/"
+data_folder <- "./Data/"
 
-hrcovs <- rast(paste(data_folder,c("dem_yuk.nc", "lat_yuk.nc","lon_yuk.nc","coast_yuk.nc"), sep = ""))
+hrcovs <- rast(paste(data_folder,c("dem_no_tile.nc", "lat_no_tile.nc","lon_no_tile.nc","coast_no_tile.nc"), sep = ""))
 
 plot(hrcovs)
 
-wrf <- rast(paste0(data_folder, "wrf_yuk.nc"))
+wrf <- rast(paste0(data_folder, "wrf_no_tile.nc"))
 #wrf <- crop(wrf,hrcovs)
 dim(wrf)
 dim(hrcovs)
@@ -92,7 +92,7 @@ plt.show()
 # Load Model and Predict
 
 ```{python}
-G = torch.jit.load("C:/Users/SBEALE/Desktop/Generators/generator_bc_nonan/Generator_230.pt")
+G = torch.jit.load("./Generators/tmax_march_250.pt")
 device = "cuda"
 wrf_tiles = [[ten.unsqueeze(0) for ten in x] for x in wrf_tile]
 hrcov_tiles = [[ten.unsqueeze(0) for ten in x] for x in res_pad]
@@ -112,7 +112,7 @@ plt.imshow(preds[2][4][0,0,...])
 plt.show()
 ```
 
-# Crop and Stitch
+# Option 1: Crop and Concat
 
 ```{python}
 ncol = len(preds)
@@ -141,6 +141,61 @@ final_pad = torch.nn.functional.pad(final_res, (pad_size,pad_size,pad_size,pad_s
 # plt.close()
 # plt.imshow(t_all)
 # plt.show()
+```
+
+# Option 2: Blending
+
+```{python}
+from torch.nn import functional as nnf
+
+ncol = len(preds)
+nrow = len(preds[0])
+scale_factor = 4
+tile_size = 128
+offset = 96
+pad_size = int((tile_size-offset)/4)
+overlap_size = pad_size * 2
+new_size = tile_size - overlap_size
+
+##crop edges
+pred_crop = [[ten[0,0,pad_size:-pad_size,pad_size:-pad_size] for j,ten in enumerate(x)] for i,x in enumerate(preds)]
+
+###make masks
+t1 = torch.linspace(0,1,overlap_size).repeat(112,1)
+t2 = torch.ones((112,112-(overlap_size*2))) 
+t3 = torch.linspace(1,0,overlap_size).repeat(112,1)
+tile_mask = torch.cat([t1,t2,t3], dim = 1).transpose(0,1)
+
+def blend_row(row_ls):
+  temp = torch.cat([x.reshape(1,new_size**2,1) for x in row_ls],dim = 2)
+  out = nnf.fold(temp, (nrow*offset + overlap_size*2,new_size), kernel_size=(new_size,new_size), stride=offset).squeeze()
+  return out
+
+## mask individual tiles
+mask_tiles = [[ten * tile_mask for ten in x] for x in pred_crop]
+pred_cols = [blend_row(x) for x in mask_tiles]
+
+## make column mask
+col_dims = pred_cols[0].shape
+t1 = torch.linspace(0,1,overlap_size).repeat(col_dims[0],1)
+t2 = torch.ones((col_dims[0],112-(overlap_size*2))) 
+t3 = torch.linspace(1,0,overlap_size).repeat(col_dims[0],1)
+column_mask = torch.cat([t1,t2,t3], dim = 1)
+
+mask_cols = [column_mask * x for x in pred_cols]
+
+##blend and concatenate cols
+temp = [x.reshape(1,col_dims[0]*col_dims[1],1) for x in mask_cols]
+uf = torch.cat(temp, dim = 2)
+raw = nnf.fold(uf, (col_dims[0],ncol*offset + overlap_size*2), kernel_size=col_dims, stride=offset)
+result = raw.squeeze()
+
+plt.close()
+plt.imshow(result)
+plt.show()
+
+final_pad = nnf.pad(final_res, (pad_size,pad_size,pad_size,pad_size), mode = "constant", value = 0)
+#plt.savefig("Test_Blending.png", dpi = 800)
 ```
 
 ```{python}
@@ -178,7 +233,7 @@ unstand_std <- 3.930177
 res_us <- (res * unstand_std) + (unstand_mean)
 plot(res_us)
 
-writeRaster(res_us, "C:/Users/SBEALE/Desktop/check/GAN_Preds_June21_stand_gen230_large.tif", overwrite = T)
+writeRaster(res_us, paste0(data_folder, "GEN_Results.tif"), overwrite = T)
 ```
 
 ## Old
