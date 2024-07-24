@@ -20,13 +20,14 @@ from matplotlib import colorbar, colors, gridspec
 library(terra)
 library(data.table)
 
-data_folder <- "./Data/"
+obj_store <- "Y:/Mosaic_Yukon/tmax_march_nonan_BC_all/"
+data_folder <- "./Data/precip_worldclim/"
 
-hrcovs <- rast(paste(data_folder,c("dem_no_tile.nc", "lat_no_tile.nc","lon_no_tile.nc","coast_no_tile.nc"), sep = ""))
+hrcovs <- rast(paste(data_folder,c("dem_test.nc", "lat_test.nc","lon_test.nc","coast_test.nc"), sep = ""))
 
 plot(hrcovs)
 
-wrf <- rast(paste0(data_folder, "wrf_no_tile.nc"))
+wrf <- rast(paste0(data_folder, "worldclim_test.nc"))
 #wrf <- crop(wrf,hrcovs)
 dim(wrf)
 dim(hrcovs)
@@ -46,15 +47,18 @@ hrcov = torch.from_numpy(cond_fields.to_array().to_numpy())[0,...]
 wrf_fields = xr.open_dataset(data_folder + "wrf_cropped.nc")
 wrf2 = torch.from_numpy(wrf_fields.to_array().to_numpy())[0,...]
 
+prism_fields = xr.open_dataset(data_folder + "prism_test.nc")
+prism = torch.from_numpy(prism_fields.to_array().to_numpy())[0,...]
+
 plt.close()
 plt.imshow(hrcov[0,...])
 plt.show()
 
 plt.close()
-plt.imshow(wrf2)
+plt.imshow(prism)
 plt.show()
 
-wrf2[torch.isnan(wrf2)] = 0
+#wrf2[torch.isnan(wrf2)] = 0
 ```
 
 # Make tiles
@@ -92,7 +96,7 @@ plt.show()
 # Load Model and Predict
 
 ```{python}
-G = torch.jit.load("./Generators/tmax_march_250.pt")
+G = torch.jit.load("./Generators/generator_prec_march_nonan_worldclim/Generator_250.pt")
 device = "cuda"
 wrf_tiles = [[ten.unsqueeze(0) for ten in x] for x in wrf_tile]
 hrcov_tiles = [[ten.unsqueeze(0) for ten in x] for x in res_pad]
@@ -104,12 +108,103 @@ preds = [[G(wrf.to(device).float(),hr.to(device).float()).cpu().detach() for wrf
 
 ```{python}
 plt.close()
-plt.imshow(preds[2][4][0,0,...])
+plt.imshow(prism_tiles[4][4][0,...])
+plt.show()
+
+plt.close()
+plt.imshow(preds[4][4][0,0,...])
+plt.show()
+```
+
+# RASP Metrics
+
+```{python}
+import scipy
+def RASP(img,real):
+    # Input data
+    ynew = img # Generated data
+    npix = ynew.shape[-1] # Shape of image in one dimension
+
+    # Define the wavenumbers basically
+    kfreq = np.fft.fftfreq(npix) * npix 
+    kfreq2D = np.meshgrid(kfreq, kfreq) 
+    knrm = np.sqrt(kfreq2D[0]**2 + kfreq2D[1]**2) # Magnitude of wavenumber/vector
+    knrm = knrm.flatten() 
+
+    # Computes the fourier transform and returns the amplitudes
+    def calculate_2dft(image):
+        fourier_image = np.fft.fftn(image)
+        fourier_amplitudes = np.abs(fourier_image)**2
+        return fourier_amplitudes.flatten()
+
+    powers_gen = []
+    powers_truth = []
+    for i in range(ynew.shape[0]):
+        wind_2d = calculate_2dft(ynew[i, ...])
+        wind_real = calculate_2dft(real[i,...])
+        kbins = np.arange(0.5, npix//2+1, 1.) # Bins to average the spectra
+        Abins, _, _ = scipy.stats.binned_statistic(knrm, wind_2d, statistic = "mean", bins = kbins) 
+        Abins *= np.pi * (kbins[1:]**2 - kbins[:-1]**2)
+        
+        # now for ground truth
+        Abins_R, _, _ = scipy.stats.binned_statistic(knrm, wind_real, statistic = "mean", bins = kbins) 
+        Abins_R *= np.pi * (kbins[1:]**2 - kbins[:-1]**2)
+        powers_gen.append(Abins)
+        powers_truth.append(Abins_R)
+
+    return(powers_gen, powers_truth)
+```
+
+```{python}
+
+prism_tiles = tile_data(prism.unsqueeze(0), tile_size, offset)
+
+plt.close()
+plt.imshow(prism_tiles[2][4][0,...])
 plt.show()
 
 plt.close()
 plt.imshow(preds[2][4][0,0,...])
 plt.show()
+
+ncol = len(preds)
+nrow = len(preds[0])
+
+##calculate rasp for each tile
+rasp_pred = []
+rasp_truth = []
+for col in range(1,ncol):
+  for row in range(1,nrow):
+    pred, truth = RASP(preds[col][row][:,0,...].numpy(), prism_tiles[col][row].numpy())
+    rasp_pred.append(pred)
+    rasp_truth.append(truth)
+```
+
+## Plot RASP
+
+```{r}
+library(data.table)
+library(ggplot2)
+library(reticulate)
+library(matrixStats)
+
+##note - if there are tiles with empty portions, will have to remove those before calculating statistics, else with be NA
+dat <- py$rasp_pred
+truth <- py$rasp_truth
+
+temp_gen <- matrix(unlist(dat), ncol = 64, byrow = T)
+temp_tr <- matrix(unlist(truth), ncol = 64, byrow = T)
+temp <- temp_gen/temp_tr
+t_med <- colMedians(temp)
+t_iqr <- colQuantiles(temp, probs = c(0.25,0.75))
+t1 <- as.data.table(cbind(t_med, t_iqr))
+t1[,FreqBand := 1:64]
+
+ggplot(t1, aes(x = FreqBand, y = t_med)) +
+  geom_line(linewidth = 1) +
+  geom_ribbon(aes(ymin = `25%`, ymax = `75%`), alpha = 0.3, linetype = 1)+
+  geom_hline(yintercept = 1)+
+  ylim(0,30)
 ```
 
 # Option 1: Crop and Concat
@@ -128,6 +223,9 @@ plt.show()
 
 final_res = torch.cat(pred_cols, dim = 1)
 final_pad = torch.nn.functional.pad(final_res, (pad_size,pad_size,pad_size,pad_size), mode = "constant", value = 0)
+plt.close()
+plt.imshow(final_pad)
+plt.show()
 # left = [ten[0,0,:,:pad_size] for ten in preds[0]]
 # right = [ten[0,0,:,-pad_size:] for ten in preds[ncol-1]]
 # l_all = torch.cat(left, dim = 0)[pad_size:-pad_size,:]
@@ -194,7 +292,7 @@ plt.close()
 plt.imshow(result)
 plt.show()
 
-final_pad = nnf.pad(final_res, (pad_size,pad_size,pad_size,pad_size), mode = "constant", value = 0)
+final_pad = nnf.pad(result, (pad_size,pad_size,pad_size,pad_size), mode = "constant", value = 0)
 #plt.savefig("Test_Blending.png", dpi = 800)
 ```
 
@@ -233,7 +331,7 @@ unstand_std <- 3.930177
 res_us <- (res * unstand_std) + (unstand_mean)
 plot(res_us)
 
-writeRaster(res_us, paste0(data_folder, "GEN_Results.tif"), overwrite = T)
+writeRaster(res_us, paste0(data_folder, "GEN_Results_Blend.tif"), overwrite = T)
 ```
 
 ## Old
