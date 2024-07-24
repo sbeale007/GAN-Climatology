@@ -48,14 +48,16 @@ wrf_fields = xr.open_dataset(data_folder + "wrf_large.nc")
 wrf2 = torch.from_numpy(wrf_fields.to_array().to_numpy())[...]
 
 plt.close()
-plt.imshow(hrcov[1,...])
+plt.imshow(hrcov[2,...])
+plt.colorbar()
 plt.show()
 
 plt.close()
-plt.imshow(wrf2[0,0,...])
+plt.imshow(wrf2[1,2,...])
+plt.colorbar()
 plt.show()
 
-wrf2[torch.isnan(wrf2)] = 0
+wrf2[0][torch.isnan(wrf2[0])] = 0
 ```
 
 # Make tiles
@@ -65,8 +67,8 @@ import math
 def tile_data(tensor, tile_size, offset):
   h, w = tensor.size(1), tensor.size(2)
   res_ls = []
-  for y in range(int(math.ceil(h/offset))):
-    for x in range(int(math.ceil(w/offset))):
+  for y in range(int(math.ceil(h/offset))-1):
+    for x in range(int(math.ceil(w/offset))-1):
       curr = tensor[:, offset*y:min(offset*y+tile_size, h), offset*x:min(offset*x+tile_size, w)]
       if(y == 0):
         res_ls.append([curr])
@@ -77,18 +79,32 @@ def tile_data(tensor, tile_size, offset):
 	
 scale_factor = 4
 tile_size = 128
-offset = 96
+offset = 32
 res_pad = tile_data(hrcov, tile_size, offset)
-mon = wrf2[1,...]
-wrfmon = wrf2[0,...]
+mon = wrf2[1]
+wrfmon = wrf2[0]
+
+
+plt.close()
+# torch.Size([34, 22, 4, 128, 128])
+plt.imshow(res_pad[0][-1][2],cmap='viridis')
+plt.colorbar()
+plt.show()
+
 wrf_tile = []
 mon_tile = []
 for i in range(0,12):
   wrf_tile.append(tile_data(wrfmon[i].unsqueeze(0), int(tile_size/scale_factor), int (offset/scale_factor)))
   mon_tile.append(tile_data(mon[i].unsqueeze(0), int(tile_size/scale_factor), int (offset/scale_factor)))
+  
+for i in range(0,12):
+  for j in range(0,len(mon_tile[0])):
+    for m in range(0,len(mon_tile[0][0])):
+      mon_tile[i][j][m] = torch.ones(1,32,32)*(i+1)
 
 plt.close()
-plt.imshow(res_pad[2][4][0,...])
+plt.imshow(mon_tile[2][0][-1][0,...])
+plt.colorbar()
 plt.show()
 ```
 
@@ -98,6 +114,20 @@ mon_tile = torch.from_numpy(np.array(mon_tile))
 res_pad = torch.from_numpy(np.array(res_pad))
 
 wrf_mon = torch.cat((wrf_tile, mon_tile), dim=3)
+```
+
+```{python}
+plt.close()
+# torch.Size([12, 34, 22, 2, 32, 32])
+plt.imshow(wrf_mon[2,0,-1,0,...], cmap='viridis')
+plt.colorbar()
+plt.show()
+
+plt.close()
+# torch.Size([34, 22, 5, 128, 128])
+plt.imshow(res_pad[0,-1,2,...], cmap='viridis')
+plt.colorbar()
+plt.show()
 ```
 
 `{plt.close()} plt.imshow(wrf_tile[2][4][0,...]) plt.show()`
@@ -254,10 +284,10 @@ library(data.table)
 library(reticulate)
 
 res <- hrcovs[[1]]
-rast_dim <- dim(res)
 preds <- py$res_np
 dim(preds)
-dim(res) = c(2065, 3218, 12)
+dim(res) = c(2144, 3296, 12)
+rast_dim <- dim(res)
 
 for (i in 1:12) {
   x <- preds[i,1:rast_dim[1],1:rast_dim[2]]
@@ -273,10 +303,10 @@ plot(res_us)
 
 res_us <- project(res_us, hrcovs)
 
-writeRaster(res_us, "C:/Users/SBEALE/Desktop/Gan Predictions/GAN_tmax_allmonths_gen220.tif", overwrite = T)
+writeRaster(res_us, "C:/Users/SBEALE/Desktop/Gan Predictions/GAN_tmax_allmonths_gen220_offset32.tif", overwrite = T)
 
 
-writeCDF(res_us, "C:/Users/SBEALE/Desktop/Gan Predictions/GAN_tmax_allmonths_gen220.nc", var='tmax', overwrite = T)
+writeCDF(res_us, "C:/Users/SBEALE/Desktop/Gan Predictions/GAN_tmax_allmonths_gen220_offset32.nc", var='tmax', overwrite = T)
 ```
 
 ## Old

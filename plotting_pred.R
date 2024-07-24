@@ -5,27 +5,34 @@ library(RColorBrewer)
 library(ranger)
 library(rworldmap)
 
-pred230 <- rast('//objectstore2.nrs.bcgov/ffec/Mosaic_Yukon/GAN_Preds_June21_stand_gen230_large.tif')
-pred110 <- rast('//objectstore2.nrs.bcgov/ffec/Mosaic_Yukon/GAN_Preds_June21_stand_gen110_large.tif')
-dem <- rast("C:/Users/SBEALE/Desktop/Cropped_WRF_PRISM/DEM.nc")
-# pred <- (pred*2.575667) + (-1.4281803)
-plot(pred230)
+dem <- rast("C:/Users/SBEALE/Desktop/Cropped_Coarsened_WRF_PRISM/no_overlap/DEM.nc")
 
-# load the BC PRISM  data for the variable
-prism.bc <- rast('//objectstore2.nrs.bcgov/ffec/Climatologies/PRISM_BC/tmax_monClim_PRISM_historical_198101-201012_3.tif')
-prism.bc <- project(prism.bc, dem)
-plot(prism.bc)
+# pred_wrf <- rast('C:/Users/SBEALE/Desktop/Gan Predictions/prec/wrf/march_nonan_bc/GAN_prec_bc_march_nonan_gen250.tif')
+# pred_wrfextra <- rast('C:/Users/SBEALE/Desktop/Gan Predictions/prec/wrf/march_nonan_extracov/GAN_prec_extracov_march_gen250.tif')
+# pred_wrf_ns <- rast('C:/Users/SBEALE/Desktop/Gan Predictions/prec/wrf/north_south_train/GAN_prec_march_nonan_wrf_gen250.tif')
+# pred_wc <- rast('C:/Users/SBEALE/Desktop/Gan Predictions/prec/worldclim/march_nonan_bc/GAN_prec_march_nonan_worldclim_gen250.tif')
+# pred_wc_ns <- rast('C:/Users/SBEALE/Desktop/Gan Predictions/prec/worldclim/north_south_train_replace_w_wrf/GAN_prec_north_south_train_wc_gen250.tif')
 
-pred230 <- project(pred230, prism.bc)
-pred110 <- project(pred110, prism.bc)
+# load the PRISM  data for the variable
+prism <- rast('C:/Users/SBEALE/Desktop/Cropped_Coarsened_WRF_PRISM/tmax_03_PRISM.nc')
+# 
+wc <- rast("C:/Users/SBEALE/Desktop/Cropped_Coarsened_WRF_PRISM/no_overlap/correct/tmax_03_WorldClim_coarse_focal.nc")
+wc <- project(wc, prism)
+# 
+# wrf <- rast('C:/Users/SBEALE/Desktop/Cropped_Coarsened_WRF_PRISM/no_overlap/tmin_03_WRF_coarse.nc')
+# wrf <- project(wrf, prism)
+# 
+daymet <- rast('//objectstore2.nrs.bcgov/ffec/Climatologies/Daymet/daymet_1981_2010_tmax_03.tif')
+daymet <- project(daymet, prism)
 
-# # load the AK PRISM  data for the variable
-# prism.ak <- rast('//objectstore2.nrs.bcgov/ffec/Climatologies/PRISM_AK/ak_tmax_1981_2010.03.asc')
-# prism.ak <- project(prism.ak, dem)
-# plot(prism.ak)
+# pred_wrf <- project(pred_wrf, prism)
+# pred_wrfextra <- project(pred_wrfextra, prism)
+# pred_wrf_ns <- project(pred_wrf_ns, prism)
+# pred_wc <- project(pred_wc, prism)
 
 # color scheme
-combined <- c(values(prism.bc), values(pred230), values(pred110))
+# combined <- c(values(prism), values(pred_wrf), values(pred_wrfextra), values(pred_wrf_ns), values(pred_wc))
+combined <- c(values(prism), values(wc), values(daymet))
 combined <- combined[is.finite(combined)]
 inc=diff(range(combined))/500
 breaks=seq(quantile(combined, 0.005)-inc, quantile(combined, 0.995)+inc, inc)
@@ -38,11 +45,17 @@ ColPal.raster <- colorBin(ColScheme, bins=breaks, na.color = "transparent")
 map <- leaflet() %>%
   addTiles(group = "basemap") %>%
   addProviderTiles('Esri.WorldImagery', group = "sat photo") %>%
-  addRasterImage(prism.bc, colors = ColPal.raster, opacity = 1, maxBytes = 7 * 1024 * 1024, group = "BC PRISM") %>%
-  addRasterImage(pred230, colors = ColPal.raster, opacity = 1, maxBytes = 7 * 1024 * 1024, group = "GAN 230") %>%
-  addRasterImage(pred110, colors = ColPal.raster, opacity = 1, maxBytes = 7 * 1024 * 1024, group = "GAN 110") %>%
-  addLayersControl(
-    overlayGroups = c("BC PRISM", "GAN 230", "GAN 110"),
+  addRasterImage(prism, colors = ColPal.raster, opacity = 1, maxBytes = 7 * 1024 * 1024 , group = "PRISM") %>%
+  # addRasterImage(wrf, colors = ColPal.raster, opacity = 1, maxBytes = 7 * 1024 * 1024 , group = "WRF") %>%
+  addRasterImage(wc, colors = ColPal.raster, opacity = 1, maxBytes = 7 * 1024 * 1024 , group = "WorldClim") %>%
+  addRasterImage(daymet, colors = ColPal.raster, opacity = 1, maxBytes = 7 * 1024 * 1024 , group = "Daymet") %>%
+  # addRasterImage(pred_wrf, colors = ColPal.raster, opacity = 1, maxBytes = 7 * 1024 * 1024 , group = "GAN WRF") %>%
+  # addRasterImage(pred_wrfextra, colors = ColPal.raster, opacity = 1, maxBytes = 7 * 1024 * 1024 , group = "GAN WRF Extra Covariates") %>%
+  # addRasterImage(pred_wrf_ns, colors = ColPal.raster, opacity = 1, maxBytes = 7 * 1024 * 1024 , group = "GAN North + South Train") %>%
+  # addRasterImage(pred_wc, colors = ColPal.raster, opacity = 1, maxBytes = 7 * 1024 * 1024 , group = "GAN WorldClim") %>%
+  # addRasterImage(pred_wc_ns, colors = ColPal.raster, opacity = 1, maxBytes = 7 * 1024 * 1024 , group = "GAN WorldClim North + South Train") %>%
+  addLayersControl(  
+    overlayGroups = c("PRISM", "WorldClim", "Daymet"),
     options = layersControlOptions(collapsed = FALSE)
   )
 map

@@ -21,9 +21,9 @@ library(reticulate)
 
 ```{python}
 
-pred_dir = 'C:/Users/SBEALE/Desktop/GAN Predictions/prec/wrf/march_nonan_extracov/'
-pred_path = pred_dir + 'GAN_prec_extracov_march_gen250.nc'
-truth_dir = "C:/Users/SBEALE/Desktop/GAN Data/prec/wrf/march_nonan_extracov/"
+pred_dir = 'C:/Users/SBEALE/Desktop/GAN Predictions/tmax/wrf/march_nonan_bc/'
+pred_path = pred_dir + 'GAN_tmax_bc_march_nonan_gen250.nc'
+truth_dir = "C:/Users/SBEALE/Desktop/GAN Data/tmax/wrf/march_nonan_bc/"
 truth_path = truth_dir + 'prism_large.nc'
 
 # load GAN predictions and true fields (PRISM) 
@@ -38,17 +38,17 @@ stand = pd.read_csv(truth_dir + 'standardization.csv')
 
 mean = stand['mean'][0]
 std = stand['std'][0]
-truth['prec'] = (truth.prec*std)+mean
+truth['tmax'] = (truth.tmax*std)+mean
 
 # cropping to testing area 
 pred_test = pred.sel(longitude=slice(-128, -120), latitude=slice(60, 56.02))
 truth_test = truth.sel(longitude=slice(-128, -120), latitude=slice(60, 56.02))
 
 # make torch tensors of fields to compute MAE and RAPSD
-x = np.array(pred_test.prec).shape[0]
-y = np.array(pred_test.prec).shape[1]
-pred_tens = torch.from_numpy(np.array(pred_test.prec)).reshape(1,1,x,y)
-truth_tens = torch.from_numpy(np.array(truth_test.prec)).reshape(1,1,x,y)
+x = np.array(pred_test.tmax).shape[0]
+y = np.array(pred_test.tmax).shape[1]
+pred_tens = torch.from_numpy(np.array(pred_test.tmax)).reshape(1,1,x,y)
+truth_tens = torch.from_numpy(np.array(truth_test.tmax)).reshape(1,1,x,y)
 
 # calculate MAE between truth and prediction 
 MAE = F.l1_loss(truth_tens, pred_tens)
@@ -57,25 +57,25 @@ MAE = F.l1_loss(truth_tens, pred_tens)
 # plotting truth, prediction, and difference (choose to save or not) 
 fig, ax = plt.subplots(1, 3, layout='constrained', figsize=(10, 5), sharex=True, sharey=True)
 
-minmin = np.min(truth.prec)
-maxmax = np.max(truth.prec)
-# prec (30), prec (3)
-dmin = -30
-dmax = 30
+minmin = np.min(truth_test.tmax)
+maxmax = np.max(truth_test.tmax)
+# precip (30), temp max (3)
+dmin = -3
+dmax = 3
 
-pc1 = ax[0].pcolormesh(truth_test.longitude, truth_test.latitude, truth_test.prec, vmin=minmin, vmax=maxmax, cmap='viridis', label=r'$m$')
+pc1 = ax[0].pcolormesh(truth_test.longitude, truth_test.latitude, truth_test.tmax, vmin=minmin, vmax=maxmax, cmap='viridis', label=r'$m$')
 ax[0].set_title(f'truth', fontsize='medium', loc='center')
 
-pc2 = ax[1].pcolormesh(pred_test.longitude, pred_test.latitude, pred_test.prec, vmin=minmin, vmax=maxmax, cmap='viridis', label=r'$m$')
+pc2 = ax[1].pcolormesh(pred_test.longitude, pred_test.latitude, pred_test.tmax, vmin=minmin, vmax=maxmax, cmap='viridis', label=r'$m$')
 ax[1].set_title(f'prediction', fontsize='medium', loc='center')
 
-pc3 = ax[2].pcolormesh(pred_test.longitude, pred_test.latitude, truth_test.prec.values-pred_test.prec.values, vmin=dmin, vmax=dmax, cmap='RdBu', label=r'$m$')
+pc3 = ax[2].pcolormesh(pred_test.longitude, pred_test.latitude, truth_test.tmax.values-pred_test.tmax.values, vmin=dmin, vmax=dmax, cmap='RdBu', label=r'$m$')
 ax[2].set_title(f'truth-prediction', fontsize='medium', loc='center')
 
 fig.supylabel('latitude [deg N]')
 fig.supxlabel('longitude [deg E]')
 
-fig.suptitle(f"March prec, MAE = %.2f" %MAE)
+fig.suptitle(f"March tmax, MAE = %.2f" %MAE)
 
 fig.colorbar(pc1, shrink=0.5, aspect=20, location='bottom', ax=ax[0:2])
 fig.colorbar(pc3, shrink=0.9, aspect=20, location='bottom', ax=ax[2])
@@ -136,7 +136,7 @@ def compute_rapsd(
     """Computes the RASPD for a given super-resolution model"""
 
     if var_ref is None:
-        var_ref = {"prec": 0}
+        var_ref = {"tmax": 0}
 
     var_rapsd = {}
     [var_rapsd.setdefault(x, []) for x in var_ref]
@@ -161,8 +161,18 @@ def compute_rapsd(
 ```
 
 ```{python}
-# may need to check size and make sure its square 
-pred_tens[...,242:719].shape
+# make tiles of testing and prediction 
+x_fine= np.arange(0,truth_tens.shape[2]-128, 8)
+y_fine = np.arange(0,truth_tens.shape[3]-128, 8)
+
+truth_tiles = []
+pred_tiles = []
+for i in range(0, len(y_fine)):
+    truth = truth_tens[:,:,:,0+y_fine[i]:128+y_fine[i]]
+    pred = pred_tens[:,:,:,0+y_fine[i]:128+y_fine[i]]
+    for j in range(0, len(x_fine)):
+        truth_tiles.append(truth[:,:,0+x_fine[j]:128+x_fine[j]])
+        pred_tiles.append(pred[:,:,0+x_fine[j]:128+x_fine[j]])
 ```
 
 ```{python}
@@ -171,17 +181,28 @@ pred_tens[...,242:719].shape
 
 # doing this for testing area and training area to compare 
 
-pred_rapsd = compute_rapsd(pred_tens[...,242:719])
-truth_rapsd = compute_rapsd(truth_tens[...,242:719])
+# previous
+# pred_rapsd = compute_rapsd(pred_tens[...,242:719])
+# truth_rapsd = compute_rapsd(truth_tens[...,242:719])
+
+# loop through all tiles and calculate the RAPSD for each one, then take the average 
+truth_rapsd = []
+pred_rapsd = []
+for i in range(len(pred_tiles)):
+  truth_rapsd.append(compute_rapsd(truth_tiles[i]))
+  pred_rapsd.append(compute_rapsd(pred_tiles[i]))
+  
+for i in range(len(pred_tiles)):
+  
 
 fig,ax = plt.subplots(1, 2, figsize=(15, 5), layout='constrained')
 
-ax[0].plot(truth_rapsd['k'], truth_rapsd['prec']/truth_rapsd['prec'], label='BC PRISM')
-ax[0].plot(pred_rapsd['k'], pred_rapsd['prec']/truth_rapsd['prec'], label='GAN', linestyle='dotted')
+ax[0].plot(truth_rapsd['k'], truth_rapsd['tmax']/truth_rapsd['tmax'], label='BC PRISM')
+ax[0].plot(pred_rapsd['k'], pred_rapsd['tmax']/truth_rapsd['tmax'], label='GAN', linestyle='dotted')
 ax[0].set_title('Normalized Power Spectrum')
 
-ax[1].plot(truth_rapsd['k'], truth_rapsd['prec'], label='BC PRISM')
-ax[1].plot(truth_rapsd['k'], pred_rapsd['prec'], label='GAN', linestyle='dotted')
+ax[1].plot(truth_rapsd['k'], truth_rapsd['tmax'], label='BC PRISM')
+ax[1].plot(truth_rapsd['k'], pred_rapsd['tmax'], label='GAN', linestyle='dotted')
 ax[1].set_title('Power Spectrum')
 
 labels = ['BC PRISM', 'GAN']
@@ -191,7 +212,7 @@ ax[0].set_yscale('log')
 ax[1].set_xscale('log')
 ax[1].set_yscale('log')
 
-fig.supylabel(r'$prec \left[\frac{P(|k|)}{P(|k|)_{PRISM}}\right]$')
+fig.supylabel(r'$tmax \left[\frac{P(|k|)}{P(|k|)_{PRISM}}\right]$')
 fig.supxlabel('Wavenumber $|k|$')
 ax[0].grid()
 ax[1].grid()
@@ -209,22 +230,22 @@ plt.close()
 pred_train = pred.sel(longitude=slice(-133, -129), latitude=slice(60, 56.02))
 truth_train = truth.sel(longitude=slice(-133, -129), latitude=slice(60, 56.02))
 
-x = np.array(pred_train.prec).shape[0]
-y = np.array(truth_train.prec).shape[1]
-pred_tens_train = torch.from_numpy(np.array(pred_train.prec)).reshape(1,1,x,y)
-truth_tens_train = torch.from_numpy(np.array(truth_train.prec)).reshape(1,1,x,y)
+x = np.array(pred_train.tmax).shape[0]
+y = np.array(truth_train.tmax).shape[1]
+pred_tens_train = torch.from_numpy(np.array(pred_train.tmax)).reshape(1,1,x,y)
+truth_tens_train = torch.from_numpy(np.array(truth_train.tmax)).reshape(1,1,x,y)
 
 pred_rapsd = compute_rapsd(pred_tens_train[...,1:-2])
 truth_rapsd = compute_rapsd(truth_tens_train[...,1:-2])
 
 fig,ax = plt.subplots(1, 2, figsize=(15, 5), layout='constrained')
 
-ax[0].plot(truth_rapsd['k'], truth_rapsd['prec']/truth_rapsd['prec'], label='BC PRISM')
-ax[0].plot(pred_rapsd['k'], pred_rapsd['prec']/truth_rapsd['prec'], label='GAN', linestyle='dotted')
+ax[0].plot(truth_rapsd['k'], truth_rapsd['tmax']/truth_rapsd['tmax'], label='BC PRISM')
+ax[0].plot(pred_rapsd['k'], pred_rapsd['tmax']/truth_rapsd['tmax'], label='GAN', linestyle='dotted')
 ax[0].set_title('Normalized Power Spectrum')
 
-ax[1].plot(truth_rapsd['k'], truth_rapsd['prec'], label='BC PRISM')
-ax[1].plot(truth_rapsd['k'], pred_rapsd['prec'], label='GAN', linestyle='dotted')
+ax[1].plot(truth_rapsd['k'], truth_rapsd['tmax'], label='BC PRISM')
+ax[1].plot(truth_rapsd['k'], pred_rapsd['tmax'], label='GAN', linestyle='dotted')
 ax[1].set_title('Power Spectrum')
 
 labels = ['BC PRISM', 'GAN']
@@ -234,7 +255,7 @@ ax[0].set_yscale('log')
 ax[1].set_xscale('log')
 ax[1].set_yscale('log')
 
-fig.supylabel(r'$prec \left[\frac{P(|k|)}{P(|k|)_{PRISM}}\right]$')
+fig.supylabel(r'$tmax \left[\frac{P(|k|)}{P(|k|)_{PRISM}}\right]$')
 fig.supxlabel('Wavenumber $|k|$')
 ax[0].grid()
 ax[1].grid()
@@ -248,20 +269,71 @@ plt.close()
 ```
 
 ```{r}
+# For calculating lapse rates, terra::focalReg() is your friend with climate and elevation as the y and x. 
+
+# In both functions, you can achieve a geographically circular focal area by correcting for the convergence of longitude lines. 
 
 # loading rasters of prediction and PRISM 
 pred <- rast(py$pred_path)
 truth <- rast(py$truth_path)
+dem <- rast("C:/Users/SBEALE/Desktop/Cropped_Coarsened_WRF_PRISM/no_overlap/DEM.nc")
+dem_mask <- dem
+
+slope <- terrain(dem, 'slope', unit='degrees')
+slope_mask <- slope
+
+slope_mask[slope_mask <= 0.1] <- NA
+
+dem_mask[is.na(slope_mask)] <- NA
+
+# pred.proj <- project(pred, dem)
+# truth.proj <- project(truth, dem)
 
 truth <- (truth*py$std)+py$mean
+truth <- truth + 273.15
+dem.crop <- crop(dem_mask, ext(truth))
+concat.truth <- c(truth, dem.crop)
 
-# calculating slope of prec (proxy for lapse rate) 
+dem.crop <- crop(dem_mask, ext(pred))
+pred <- pred + 273.15
+concat.pred <- c(pred, dem.crop)
+
+#function for latitude-specific correction for longitudinal length of cell
+latFactor <- cos(mean(ext(dem.crop)[3:4])*(pi/180))
+
+# function for rounding to the nearest odd integer. 
+round_to_odd <- function(x) {
+  if (round(x) %% 2 == 0) {
+    return(floor(x/2) * 2 + 1)
+  } else {
+    return(round(x))
+  }
+}
+# 
+# # calculating slope of tmax (horizontal gradients? )
 pred_slope <- terrain(pred, 'slope')
 truth_slope <- terrain(truth, 'slope')
 
-writeCDF(pred_slope, paste0(py$pred_dir, "pred_lapserate.nc"), var='lapse', overwrite = T)
+# focal regression for lapse rate
+w <- 3
+focalReg.truth <- focalReg(concat.truth, w=c(w, round_to_odd(w*latFactor)), na.rm=T)
+lapse.truth <- focalReg.truth$dem
+intercept.truth <- focalReg.truth$intercept
 
-writeCDF(truth_slope, paste0(py$pred_dir, "PRISM_lapserate.nc"), var='lapse', overwrite = T)
+focalReg.pred <- focalReg(concat.pred, w=c(w, round_to_odd(w*latFactor)), na.rm=T)
+lapse.pred <- focalReg.pred$dem
+intercept.pred <- focalReg.pred$intercept
+
+# lapse.truth[is.na(lapse.truth)] <- 0
+# lapse.pred[is.na(lapse.pred)] <- 0
+
+writeCDF(lapse.pred, paste0(py$pred_dir, "pred_lapserate.nc"), var='lapse', overwrite = T)
+
+writeCDF(lapse.truth, paste0(py$pred_dir, "PRISM_lapserate.nc"), var='lapse', overwrite = T)
+
+writeCDF(pred_slope, paste0(py$pred_dir, "pred_slope.nc"), var='lapse', overwrite = T)
+
+writeCDF(truth_slope, paste0(py$pred_dir, "PRISM_slope.nc"), var='lapse', overwrite = T)
 ```
 
 ```{python}
@@ -282,11 +354,11 @@ MAE = F.l1_loss(pred_slope_tens, truth_slope_tens)
 # plot slope 
 fig, ax = plt.subplots(1, 3, layout='constrained', figsize=(10, 5), sharex=True, sharey=True)
 
-minmin = np.min(truth.lapse)
-maxmax = np.max(truth.lapse)
-# prec (0.3), prec (0.08)
-dmin = -0.3
-dmax = 0.3
+minmin = np.min(truth_test.lapse)
+maxmax = np.max(truth_test.lapse)
+# tmax (0.3), tmax (0.08)
+dmin = -0.04
+dmax = 0.04
 
 pc1 = ax[0].pcolormesh(truth_test.longitude, truth_test.latitude, truth_test.lapse, vmin=minmin, vmax=maxmax, cmap='viridis', label=r'$m$')
 ax[0].set_title(f'truth', fontsize='medium', loc='center')
@@ -300,7 +372,7 @@ ax[2].set_title(f'truth-prediction', fontsize='medium', loc='center')
 fig.supylabel('latitude [deg N]')
 fig.supxlabel('longitude [deg E]')
 
-fig.suptitle(f"March prec Lapse Rate, MAE = %.2f" %MAE)
+fig.suptitle(f"March tmax Lapse Rate, MAE = %.2f" %MAE)
 
 fig.colorbar(pc1, shrink=0.5, aspect=20, location='bottom', ax=ax[0:2])
 fig.colorbar(pc3, shrink=0.9, aspect=20, location='bottom', ax=ax[2])
