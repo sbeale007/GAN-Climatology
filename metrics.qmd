@@ -17,13 +17,16 @@ import torch.nn.functional as F
 
 library(terra)
 library(reticulate)
+library(data.table)
+library(ggplot2)
+library(matrixStats)
 ```
 
 ```{python}
 
-pred_dir = 'C:/Users/SBEALE/Desktop/GAN Predictions/tmax/wrf/march_nonan_bc/'
-pred_path = pred_dir + 'GAN_tmax_bc_march_nonan_gen250.nc'
-truth_dir = "C:/Users/SBEALE/Desktop/GAN Data/tmax/wrf/march_nonan_bc/"
+pred_dir = 'C:/Users/SBEALE/Desktop/GAN Predictions/tmax/wrf/march_nonan_extracov/'
+pred_path = pred_dir + 'GAN_tmax_extracov_march_gen250.nc'
+truth_dir = "C:/Users/SBEALE/Desktop/GAN Data/tmax/wrf/march_nonan_extracov/"
 truth_path = truth_dir + 'prism_large.nc'
 
 # load GAN predictions and true fields (PRISM) 
@@ -84,86 +87,46 @@ plt.close()
 ```
 
 ```{python}
-# code from RAPSD
-# from (Nic Annau)
+import scipy
+def RASP(img,real):
+    # Input data
+    ynew = img # Generated data
+    npix = ynew.shape[-1] # Shape of image in one dimension
 
-from typing import Generator, Tuple
+    # Define the wavenumbers basically
+    kfreq = np.fft.fftfreq(npix) * npix 
+    kfreq2D = np.meshgrid(kfreq, kfreq) 
+    knrm = np.sqrt(kfreq2D[0]**2 + kfreq2D[1]**2) # Magnitude of wavenumber/vector
+    knrm = knrm.flatten() 
 
-import numpy as np
-import scipy.stats as stats
+    # Computes the fourier transform and returns the amplitudes
+    def calculate_2dft(image):
+        fourier_image = np.fft.fftn(image)
+        fourier_amplitudes = np.abs(fourier_image)**2
+        return fourier_amplitudes.flatten()
 
+    powers_gen = []
+    powers_truth = []
+    for i in range(ynew.shape[0]):
+        wind_2d = calculate_2dft(ynew[i, ...])
+        wind_real = calculate_2dft(real[i,...])
+        kbins = np.arange(0.5, npix//2+1, 1.) # Bins to average the spectra
+        Abins, _, _ = scipy.stats.binned_statistic(knrm, wind_2d, statistic = "mean", bins = kbins) 
+        Abins *= np.pi * (kbins[1:]**2 - kbins[:-1]**2)
+        
+        # now for ground truth
+        Abins_R, _, _ = scipy.stats.binned_statistic(knrm, wind_real, statistic = "mean", bins = kbins) 
+        Abins_R *= np.pi * (kbins[1:]**2 - kbins[:-1]**2)
+        powers_gen.append(Abins)
+        powers_truth.append(Abins_R)
 
-"""This module contains functions that calculate the
-radially averaged power spectral density (RASPD)
-"""
-
-
-def calculate_2dft(image: np.ndarray) -> np.ndarray:
-    """Computes the fourier transform and returns the amplitudes"""
-    fourier_image = np.fft.fftn(image)
-    # fourier_image = torch.fft.fftn(image)
-    fourier_amplitudes = np.abs(fourier_image)**2
-    # fourier_amplitudes = torch.abs(fourier_image)**2
-
-    return fourier_amplitudes.flatten()
-
-
-def define_wavenumers(hr_dim: int) -> np.ndarray:
-    """Defines the wavenumbers for the RASPD"""
-    kfreq = np.fft.fftfreq(hr_dim)*hr_dim
-    kfreq2D = np.meshgrid(kfreq, kfreq)
-    knrm = np.sqrt(kfreq2D[0]**2 + kfreq2D[1]**2)
-    return knrm.flatten()
-
-
-def get_mean_bins(x, var_idx, knrm) -> Tuple:
-    """Calculates the mean bins for the RASPD"""
-    kbins = np.arange(0.5, x.shape[-1]//2+1, 1.)
-    kvals = 0.5 * (kbins[1:] + kbins[:-1])
-    wind_2d = calculate_2dft(x[var_idx, ...].cpu().detach().numpy())
-    average_bins, _, _ = stats.binned_statistic(
-        knrm, wind_2d, statistic="mean", bins=kbins
-        )
-    average_bins *= np.pi * (kbins[1:]**2 - kbins[:-1]**2)
-    return average_bins, kvals
-
-
-def compute_rapsd(
-        hr_field: Generator,
-        var_ref: dict = None,
-        reduce=True
-) -> np.ndarray:
-    """Computes the RASPD for a given super-resolution model"""
-
-    if var_ref is None:
-        var_ref = {"tmax": 0}
-
-    var_rapsd = {}
-    [var_rapsd.setdefault(x, []) for x in var_ref]
-
-    for x in hr_field:
-        for var_name, var_idx in var_ref.items():
-            knrm = define_wavenumers(x.shape[-1])
-            average_bins, kvals = get_mean_bins(x, var_idx, knrm)
-            var_rapsd[var_name].append(average_bins)
-
-    var_rapsd_avg = {"k": kvals}
-    for var_name in var_ref:
-        if reduce:
-            var_rapsd_avg[var_name] = np.mean(
-                np.array(var_rapsd[var_name]),
-                axis=0
-            )
-        else:
-            var_rapsd_avg[var_name] = var_rapsd[var_name]
-
-    return var_rapsd_avg
+    return(powers_gen, powers_truth)
 ```
 
 ```{python}
 # make tiles of testing and prediction 
-x_fine= np.arange(0,truth_tens.shape[2]-128, 8)
-y_fine = np.arange(0,truth_tens.shape[3]-128, 8)
+x_fine= np.arange(0,truth_tens.shape[2]-128, 96)
+y_fine = np.arange(0,truth_tens.shape[3]-128, 96)
 
 truth_tiles = []
 pred_tiles = []
@@ -173,99 +136,37 @@ for i in range(0, len(y_fine)):
     for j in range(0, len(x_fine)):
         truth_tiles.append(truth[:,:,0+x_fine[j]:128+x_fine[j]])
         pred_tiles.append(pred[:,:,0+x_fine[j]:128+x_fine[j]])
+
+# loop through all tiles and calculate the RAPSD for each one 
+rasp_pred = []
+rasp_truth = []
+for i in range(len(pred_tiles)):
+    pred, truth = RASP(pred_tiles[i].numpy(), truth_tiles[i].numpy())
+    rasp_pred.append(pred)
+    rasp_truth.append(truth)
+    
 ```
 
-```{python}
-# computing radialy averaged power spectrum for prediction and truth
-# RAPSD requires a square input so removing edges in longitude to match latitude dimension
+```{r}
+##note - if there are tiles with empty portions, will have to remove those before calculating statistics, else will be NA
+dat <- py$rasp_pred
+truth <- py$rasp_truth
 
-# doing this for testing area and training area to compare 
+temp_gen <- matrix(unlist(dat), ncol = 64, byrow = T)
+temp_tr <- matrix(unlist(truth), ncol = 64, byrow = T)
+temp <- temp_gen/temp_tr
+t_med <- colMedians(temp)
+t_iqr <- colQuantiles(temp, probs = c(0.25,0.75))
+t1 <- as.data.table(cbind(t_med, t_iqr))
+t1[,FreqBand := 1:64]
 
-# previous
-# pred_rapsd = compute_rapsd(pred_tens[...,242:719])
-# truth_rapsd = compute_rapsd(truth_tens[...,242:719])
+ggplot(t1, aes(x = FreqBand, y = t_med)) +
+  geom_line(linewidth = 1) +
+  geom_ribbon(aes(ymin = `25%`, ymax = `75%`), alpha = 0.3, linetype = 1)+
+  geom_hline(yintercept = 1)+
+  ylim(0,3)
 
-# loop through all tiles and calculate the RAPSD for each one, then take the average 
-truth_rapsd = []
-pred_rapsd = []
-for i in range(len(pred_tiles)):
-  truth_rapsd.append(compute_rapsd(truth_tiles[i]))
-  pred_rapsd.append(compute_rapsd(pred_tiles[i]))
-  
-for i in range(len(pred_tiles)):
-  
-
-fig,ax = plt.subplots(1, 2, figsize=(15, 5), layout='constrained')
-
-ax[0].plot(truth_rapsd['k'], truth_rapsd['tmax']/truth_rapsd['tmax'], label='BC PRISM')
-ax[0].plot(pred_rapsd['k'], pred_rapsd['tmax']/truth_rapsd['tmax'], label='GAN', linestyle='dotted')
-ax[0].set_title('Normalized Power Spectrum')
-
-ax[1].plot(truth_rapsd['k'], truth_rapsd['tmax'], label='BC PRISM')
-ax[1].plot(truth_rapsd['k'], pred_rapsd['tmax'], label='GAN', linestyle='dotted')
-ax[1].set_title('Power Spectrum')
-
-labels = ['BC PRISM', 'GAN']
-
-ax[0].set_xscale('log')
-ax[0].set_yscale('log')
-ax[1].set_xscale('log')
-ax[1].set_yscale('log')
-
-fig.supylabel(r'$tmax \left[\frac{P(|k|)}{P(|k|)_{PRISM}}\right]$')
-fig.supxlabel('Wavenumber $|k|$')
-ax[0].grid()
-ax[1].grid()
-
-handles, labels = ax[0].get_legend_handles_labels()
-# lgd = ax[0].legend(handles, labels, loc='upper center', bbox_to_anchor=(0.5,-0.1))
-ax[0].legend()
-
-plt.savefig(pred_dir + "test_RAPSD.png", dpi = 400)
-plt.close()
-```
-
-```{python}
-# now for some area in training region 
-pred_train = pred.sel(longitude=slice(-133, -129), latitude=slice(60, 56.02))
-truth_train = truth.sel(longitude=slice(-133, -129), latitude=slice(60, 56.02))
-
-x = np.array(pred_train.tmax).shape[0]
-y = np.array(truth_train.tmax).shape[1]
-pred_tens_train = torch.from_numpy(np.array(pred_train.tmax)).reshape(1,1,x,y)
-truth_tens_train = torch.from_numpy(np.array(truth_train.tmax)).reshape(1,1,x,y)
-
-pred_rapsd = compute_rapsd(pred_tens_train[...,1:-2])
-truth_rapsd = compute_rapsd(truth_tens_train[...,1:-2])
-
-fig,ax = plt.subplots(1, 2, figsize=(15, 5), layout='constrained')
-
-ax[0].plot(truth_rapsd['k'], truth_rapsd['tmax']/truth_rapsd['tmax'], label='BC PRISM')
-ax[0].plot(pred_rapsd['k'], pred_rapsd['tmax']/truth_rapsd['tmax'], label='GAN', linestyle='dotted')
-ax[0].set_title('Normalized Power Spectrum')
-
-ax[1].plot(truth_rapsd['k'], truth_rapsd['tmax'], label='BC PRISM')
-ax[1].plot(truth_rapsd['k'], pred_rapsd['tmax'], label='GAN', linestyle='dotted')
-ax[1].set_title('Power Spectrum')
-
-labels = ['BC PRISM', 'GAN']
-
-ax[0].set_xscale('log')
-ax[0].set_yscale('log')
-ax[1].set_xscale('log')
-ax[1].set_yscale('log')
-
-fig.supylabel(r'$tmax \left[\frac{P(|k|)}{P(|k|)_{PRISM}}\right]$')
-fig.supxlabel('Wavenumber $|k|$')
-ax[0].grid()
-ax[1].grid()
-
-handles, labels = ax[0].get_legend_handles_labels()
-# lgd = ax[0].legend(handles, labels, loc='upper center', bbox_to_anchor=(0.5,-0.1))
-ax[0].legend()
-
-plt.savefig(pred_dir + "train_RAPSD.png", dpi = 400)
-plt.close()
+ggsave(paste(py$pred_dir, "RAPSD.png", sep=""))
 ```
 
 ```{r}
@@ -282,7 +183,7 @@ dem_mask <- dem
 slope <- terrain(dem, 'slope', unit='degrees')
 slope_mask <- slope
 
-slope_mask[slope_mask <= 0.1] <- NA
+slope_mask[slope_mask <= 1] <- NA
 
 dem_mask[is.na(slope_mask)] <- NA
 
@@ -331,9 +232,9 @@ writeCDF(lapse.pred, paste0(py$pred_dir, "pred_lapserate.nc"), var='lapse', over
 
 writeCDF(lapse.truth, paste0(py$pred_dir, "PRISM_lapserate.nc"), var='lapse', overwrite = T)
 
-writeCDF(pred_slope, paste0(py$pred_dir, "pred_slope.nc"), var='lapse', overwrite = T)
+writeCDF(pred_slope, paste0(py$pred_dir, "pred_slope.nc"), var='slope', overwrite = T)
 
-writeCDF(truth_slope, paste0(py$pred_dir, "PRISM_slope.nc"), var='lapse', overwrite = T)
+writeCDF(truth_slope, paste0(py$pred_dir, "PRISM_slope.nc"), var='slope', overwrite = T)
 ```
 
 ```{python}
@@ -347,18 +248,32 @@ truth_test = truth.sel(longitude=slice(-128, -120), latitude=slice(60, 56.02))
 # calculate MAE between lapse rates (slope)
 pred_slope_tens = torch.from_numpy(np.array(pred_test.lapse))
 truth_slope_tens = torch.from_numpy(np.array(truth_test.lapse))
+x = pred_slope_tens.shape[0]
+y = pred_slope_tens.shape[1]
 
-MAE = F.l1_loss(pred_slope_tens, truth_slope_tens)
+# nan values so have to loop through to calculate MAE and avoid nans
+# for loop for iteration 
+n = 0
+sums = 0
+for i in range(0,x): 
+  for j in range(0,y):
+    if (np.isnan(truth_slope_tens[i,j])==False & np.isnan(pred_slope_tens[i,j])==False):
+      sums += abs(truth_slope_tens[i,j] - pred_slope_tens[i,j])
+      n += 1
+  
+MAE = sums/n 
+
+# MAE = F.l1_loss(pred_slope_tens, truth_slope_tens)
 # print(MAE)
 
 # plot slope 
 fig, ax = plt.subplots(1, 3, layout='constrained', figsize=(10, 5), sharex=True, sharey=True)
 
-minmin = np.min(truth_test.lapse)
-maxmax = np.max(truth_test.lapse)
+minmin = -0.009
+maxmax = 0.009
 # tmax (0.3), tmax (0.08)
-dmin = -0.04
-dmax = 0.04
+dmin = -0.009
+dmax = 0.009
 
 pc1 = ax[0].pcolormesh(truth_test.longitude, truth_test.latitude, truth_test.lapse, vmin=minmin, vmax=maxmax, cmap='viridis', label=r'$m$')
 ax[0].set_title(f'truth', fontsize='medium', loc='center')
@@ -372,7 +287,7 @@ ax[2].set_title(f'truth-prediction', fontsize='medium', loc='center')
 fig.supylabel('latitude [deg N]')
 fig.supxlabel('longitude [deg E]')
 
-fig.suptitle(f"March tmax Lapse Rate, MAE = %.2f" %MAE)
+fig.suptitle(f"March tmax Lapse Rate, MAE = %.4f" %MAE)
 
 fig.colorbar(pc1, shrink=0.5, aspect=20, location='bottom', ax=ax[0:2])
 fig.colorbar(pc3, shrink=0.9, aspect=20, location='bottom', ax=ax[2])
