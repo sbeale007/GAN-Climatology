@@ -24,8 +24,8 @@ library(terra)
 
 ```{r}
 
-pred_fold <- "C:/Users/SBEALE/Desktop/GAN Predictions/prec/worldclim/thufir_runs/prec_march_tiling16/gen1/"
-data_folder <- "C:/Users/SBEALE/Desktop/GAN Data/prec/worldclim/full_domain_shift16/"
+pred_fold <- "C:/Users/SBEALE/Desktop/GAN Predictions/prec/worldclim/thufir_runs/prec_march_tiling16/gen3/"
+data_folder <- "//objectstore2.nrs.bcgov/ffec/Mosaic_Yukon/GAN Data/prec/worldclim/full_domain_shift16/"
 
 
 hrcovs <- rast(paste(data_folder,c("dem_test.nc", "lat_test.nc","lon_test.nc","coast_test.nc"), sep = ""))
@@ -124,13 +124,19 @@ print(worldclim_tile.shape)
 ```{python}
 
 import glob
+import os
+def get_key(fp):
+    filename = os.path.splitext(os.path.basename(fp))[0]
+    int_part = int(filename.split('_')[1])
+    return int(int_part)
+
 preds = []
 
 device = "cuda"
 worldclim_tiles = [[ten.unsqueeze(0) for ten in x] for x in worldclim_tile]
 hrcov_tiles = [[ten.unsqueeze(0) for ten in x] for x in res_pad]
 
-for filepath in glob.iglob('C:/Users/SBEALE/Desktop/Generators/thufir_runs/prec_march_tiling16/gen1/*.pt'):
+for filepath in sorted(glob.iglob('C:/Users/SBEALE/Desktop/Generators/prec/worldclim/thufir_runs/march_tiling16/gen3/*.pt'), key=get_key):
     print('predicting generator: ', filepath)
     G = torch.jit.load(filepath, map_location=torch.device('cuda:0'))
 
@@ -140,10 +146,10 @@ for filepath in glob.iglob('C:/Users/SBEALE/Desktop/Generators/thufir_runs/prec_
 
 ```{python}
 
-preds = preds.from_numpy(preds)
+preds = torch.from_numpy(np.array(preds))
 torch.save(preds, r.pred_fold + 'all_gen_preds.pt')
 
-
+preds.shape
 ```
 
 # RASP Metrics
@@ -270,10 +276,12 @@ plt.close()
 # Option 1: Crop and Concat
 
 ```{python}
-# preds = torch.load(r.pred_fold + 'all_gen_preds.pt')
-
-ncol = len(preds.shape[1])
-nrow = len(preds.shape[2])
+preds = torch.load(r.pred_fold + 'all_gen_preds.pt')
+scale_factor = 4
+tile_size = 128
+offset = 32
+ncol = preds.shape[1]
+nrow = preds.shape[2]
 pad_size = int((tile_size-offset)/2)
 
 preds_un = []
@@ -284,7 +292,7 @@ for i in range(preds.shape[0]):
   preds_un.append(pred_cols)
 
 final_preds = []
-for i in range(len(preds_un)):
+for i in range(0,len(preds_un)):
   final_res = torch.cat(preds_un[i], dim = 1)
   final_pad = torch.nn.functional.pad(final_res, (pad_size,pad_size,pad_size,pad_size), mode = "constant", value = 0)
   final_preds.append(final_pad)
@@ -308,20 +316,19 @@ library(reticulate)
 
 res <- hrcovs[[1]]
 rast_dim <- dim(res)
+preds <- py$res_np
 rast_dim[3] <- dim(preds)[1]
 dim(res)[3] <- dim(preds)[1]
-preds <- py$res_np
 dim(preds)
 
-preds <- preds[1:dim(preds)[1],1:rast_dim[1],1:rast_dim[2]]
-values(res) <- preds
-# plot(preds)
+for (i in 1:31)
+  values(res[[i]]) <- preds[i,1:rast_dim[1],1:rast_dim[2]]
 
 unstand_mean <- 53.105507
 unstand_std <- 81.41918
 
 res_us <- (res * unstand_std) + (unstand_mean)
-# plot(res_us)
+plot(res_us[[1]])
 
 writeRaster(res_us, paste0(pred_fold, "GAN_prec_march_focal_nan=0_allgens.tif"), overwrite = T)
 
@@ -344,6 +351,6 @@ wc.fine <- disagg(wc, fact=4)
 pred.crop <- ifel(is.na(wc.fine), NA, pred)
 pred.crop
 
-writeCDF(pred.crop, paste0(pred_fold, "GAN_prec_march_focal_nan=0_allgens_crop.nc"), varname='prec', overwrite=TRUE)
+writeCDF(pred.crop, paste0(pred_fold, "GAN_prec_march_focal_nan=0_allgens.nc"), varname='prec', overwrite=TRUE)
 
 ```

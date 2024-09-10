@@ -20,14 +20,14 @@ from matplotlib import colorbar, colors, gridspec
 library(terra)
 library(data.table)
 
-obj_store <- "Y:/Mosaic_Yukon/tmax_march_nonan_BC_all/"
-data_folder <- "./Data/precip_worldclim/"
+pred_fold <- "C:/Users/SBEALE/Desktop/GAN Predictions/tmax/worldclim/full_domain/"
+data_folder <- "C:/Users/SBEALE/Desktop/GAN Data/tmax/worldclim/full_domain/"
 
-hrcovs <- rast(paste(data_folder,c("dem_test.nc", "lat_test.nc","lon_test.nc","coast_test.nc"), sep = ""))
+hrcovs <- rast(paste(data_folder,c("dem_large.nc", "lat_large.nc","lon_large.nc","coast_large.nc"), sep = ""))
 
 plot(hrcovs)
 
-wrf <- rast(paste0(data_folder, "worldclim_test.nc"))
+wrf <- rast(paste(data_folder, c("worldclim_large.nc", "daymet_large.nc"), sep=""))
 #wrf <- crop(wrf,hrcovs)
 dim(wrf)
 dim(hrcovs)
@@ -47,7 +47,7 @@ hrcov = torch.from_numpy(cond_fields.to_array().to_numpy())[0,...]
 wrf_fields = xr.open_dataset(data_folder + "wrf_cropped.nc")
 wrf2 = torch.from_numpy(wrf_fields.to_array().to_numpy())[0,...]
 
-prism_fields = xr.open_dataset(data_folder + "prism_test.nc")
+prism_fields = xr.open_dataset(data_folder + "prism_large.nc")
 prism = torch.from_numpy(prism_fields.to_array().to_numpy())[0,...]
 
 plt.close()
@@ -58,7 +58,7 @@ plt.close()
 plt.imshow(prism)
 plt.show()
 
-#wrf2[torch.isnan(wrf2)] = 0
+wrf2[torch.isnan(wrf2)] = 0
 ```
 
 # Make tiles
@@ -80,9 +80,12 @@ def tile_data(tensor, tile_size, offset):
 	
 scale_factor = 4
 tile_size = 128
-offset = 96
+offset = 32
 res_pad = tile_data(hrcov, tile_size, offset)
-wrf_tile = tile_data(wrf2.unsqueeze(0), int(tile_size/scale_factor), int(offset/scale_factor))
+
+wrf_tile = tile_data(wrf2[0].unsqueeze(0), int(tile_size/scale_factor), int(offset/scale_factor))
+
+day_tile = tile_data(wrf2[1].unsqueeze(0), int(tile_size/scale_factor), int(offset/scale_factor))
 
 plt.close()
 plt.imshow(res_pad[2][4][0,...])
@@ -93,10 +96,17 @@ plt.imshow(wrf_tile[2][4][0,...])
 plt.show()
 ```
 
+```{python}
+wc = torch.from_numpy(np.array(wrf_tile))
+da = torch.from_numpy(np.array(day_tile))
+
+wrf_tile = torch.cat((wc,da), dim=2)
+```
+
 # Load Model and Predict
 
 ```{python}
-G = torch.jit.load("./Generators/generator_prec_march_nonan_worldclim/Generator_250.pt")
+G = torch.jit.load("C:/Users/SBEALE/Desktop/Generators/tmax_march_nonan_bc_worldclim_daymet/Generator_250.pt")
 device = "cuda"
 wrf_tiles = [[ten.unsqueeze(0) for ten in x] for x in wrf_tile]
 hrcov_tiles = [[ten.unsqueeze(0) for ten in x] for x in res_pad]
@@ -175,6 +185,7 @@ rasp_pred = []
 rasp_truth = []
 for col in range(1,ncol):
   for row in range(1,nrow):
+  # if (!np.isnan(prism_tiles[col][row])):
     pred, truth = RASP(preds[col][row][:,0,...].numpy(), prism_tiles[col][row].numpy())
     rasp_pred.append(pred)
     rasp_truth.append(truth)
@@ -325,13 +336,15 @@ preds <- preds[1:rast_dim[1],1:rast_dim[2]]
 values(res) <- preds
 plot(res)
 
-unstand_mean <- 1.636475
-unstand_std <- 3.930177
+unstand_mean <- 131.30608
+unstand_std <- 110.630066
 
 res_us <- (res * unstand_std) + (unstand_mean)
 plot(res_us)
 
-writeRaster(res_us, paste0(data_folder, "GEN_Results_Blend.tif"), overwrite = T)
+writeRaster(res_us, paste0(pred_fold, "GAN_tmax_march_prism.tif"), overwrite = T)
+
+writeCDF(res_us, paste0(pred_fold, "GAN_tmax_march_prism.nc"), varname='tmax', overwrite = T)
 ```
 
 ## Old
