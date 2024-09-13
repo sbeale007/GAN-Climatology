@@ -24,15 +24,17 @@ library(terra)
 
 ```{r}
 
-pred_fold <- "C:/Users/SBEALE/Desktop/operational/tmax/sep/Predictions/gen1/"
-data_folder <- "C:/Users/SBEALE/Desktop/operational/tmax/sep/shift16_32/"
+pred_fold <- "//objectstore2.nrs.bcgov/ffec/Mosaic_Yukon/operational/worldclim/tmin/feb/Predictions/"
+data_folder <- "//objectstore2.nrs.bcgov/ffec/Mosaic_Yukon/operational/worldclim/prec/feb/shift16_32/"
+
+cov_folder <- "//objectstore2.nrs.bcgov/ffec/Mosaic_Yukon/operational/Covariates/"
 
 
-hrcovs <- rast(paste(data_folder,c("dem_train.nc", "lat_train.nc","lon_train.nc","coast_train.nc"), sep = ""))
+hrcovs <- rast(paste(cov_folder,c("dem_train.nc", "lat_train.nc","lon_train.nc","coast_train.nc"), sep = ""))
 
 plot(hrcovs)
 
-worldclim <- rast(paste(data_folder, c("worldclim_train.nc", "worldclim_mask_train.nc"), sep=""))
+worldclim <- rast(c(paste(data_folder, "worldclim_train.nc", sep=""), paste(cov_folder, "worldclim_mask_train.nc", sep="")))
 #worldclim <- crop(worldclim,hrcovs)
 dim(worldclim)
 dim(hrcovs)
@@ -136,7 +138,7 @@ plt.close()
 # Load Model and Predict
 
 ```{python}
-G = torch.jit.load("C:/Users/SBEALE/Desktop/operational/tmax/sep/Generators/gen1/Generator_100.pt", map_location=torch.device('cuda:0'))
+G = torch.jit.load("//objectstore2.nrs.bcgov/ffec/Mosaic_Yukon/operational/worldclim/tmin/feb/Generators/Generator_100.pt", map_location=torch.device('cuda:0'))
 device = "cuda"
 worldclim_tiles = [[ten.unsqueeze(0) for ten in x] for x in worldclim_tile]
 hrcov_tiles = [[ten.unsqueeze(0) for ten in x] for x in res_pad]
@@ -219,13 +221,15 @@ preds <- preds[1:rast_dim[1],1:rast_dim[2]]
 values(res) <- preds
 plot(res)
 
-unstand_mean <- 15.656523
-unstand_std <- 5.0113034
+x <- read.csv(paste(data_folder, "standardization.csv", sep=""))
+
+unstand_mean <- x[[3]][1]
+unstand_std <- x[[4]][1]
 
 res_us <- (res * unstand_std) + (unstand_mean)
 plot(res_us)
 
-writeCDF(res_us, paste0(pred_fold, "GAN_gen100.nc"), varname='tmax', overwrite = T)
+writeCDF(res_us, paste0(pred_fold, "GAN_gen100.nc"), varname='tmin', overwrite = T)
 ```
 
 ## Fix pred artifacts (crop to wc)
@@ -236,7 +240,7 @@ pred <- rast(paste0(pred_fold, "GAN_gen100.nc"))
 plot(pred)
 
 # have to change this
-wc <- rast("C:/Users/SBEALE/Desktop/full_domain/tmax_03_WorldClim_coarse_focal_max_w15.nc")
+wc <- rast("//objectstore2.nrs.bcgov/ffec/Mosaic_Yukon/full_domain/tmin_03_WorldClim_coarse_focal_max_w15.nc")
 plot(wc)
 
 wc.fine <- disagg(wc, fact=4)
@@ -246,6 +250,6 @@ pred <- extend(pred, ext(wc.fine))
 pred.crop <- ifel(is.na(wc.fine), NA, pred)
 plot(pred.crop)
 
-writeCDF(pred.crop, paste0(pred_fold, "GAN_gen100.nc"), varname='tmax', overwrite=TRUE)
+writeCDF(pred.crop, paste0(pred_fold, "GAN_gen100.nc"), varname='tmin', overwrite=TRUE)
 
 ```
