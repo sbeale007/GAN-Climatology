@@ -24,8 +24,8 @@ library(terra)
 
 ```{r}
 
-pred_fold <- "//objectstore2.nrs.bcgov/ffec/Mosaic_Yukon/operational/worldclim/tmin/feb/Predictions/"
-data_folder <- "//objectstore2.nrs.bcgov/ffec/Mosaic_Yukon/operational/worldclim/prec/feb/shift16_32/"
+pred_fold <- "//objectstore2.nrs.bcgov/ffec/Mosaic_Yukon/operational/worldclim/tmin/dec/Predictions/gen2/"
+data_folder <- "//objectstore2.nrs.bcgov/ffec/Mosaic_Yukon/operational/worldclim/tmin/dec/shift16_32/"
 
 cov_folder <- "//objectstore2.nrs.bcgov/ffec/Mosaic_Yukon/operational/Covariates/"
 
@@ -138,7 +138,7 @@ plt.close()
 # Load Model and Predict
 
 ```{python}
-G = torch.jit.load("//objectstore2.nrs.bcgov/ffec/Mosaic_Yukon/operational/worldclim/tmin/feb/Generators/Generator_100.pt", map_location=torch.device('cuda:0'))
+G = torch.jit.load("//objectstore2.nrs.bcgov/ffec/Mosaic_Yukon/operational/worldclim/tmin/dec/Generators/gen2/Generator_100.pt", map_location=torch.device('cuda:0'))
 device = "cuda"
 worldclim_tiles = [[ten.unsqueeze(0) for ten in x] for x in worldclim_tile]
 hrcov_tiles = [[ten.unsqueeze(0) for ten in x] for x in res_pad]
@@ -240,7 +240,7 @@ pred <- rast(paste0(pred_fold, "GAN_gen100.nc"))
 plot(pred)
 
 # have to change this
-wc <- rast("//objectstore2.nrs.bcgov/ffec/Mosaic_Yukon/full_domain/tmin_03_WorldClim_coarse_focal_max_w15.nc")
+wc <- rast("C:/Users/SBEALE/Desktop/full_domain/tmin_03_WorldClim_coarse_focal_max_w15.nc")
 plot(wc)
 
 wc.fine <- disagg(wc, fact=4)
